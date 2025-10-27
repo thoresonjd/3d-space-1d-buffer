@@ -1,1 +1,1 @@
-# 1-Dimensional Buffer Representation of 3-Dimensional Space
+# 1-Dimensional Buffer Representation of a Third-Order Tensor

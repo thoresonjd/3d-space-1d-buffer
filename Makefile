@@ -1,5 +1,5 @@
 C = gcc
-C_FLAGS = -std=c11 -Wall -Werror -pedantic -ggdb -O0
+C_FLAGS = -std=c2x -Wall -Werror -pedantic -ggdb -O0
 PROGRAM = 3d
 
 $(PROGRAM): $(PROGRAM).c
