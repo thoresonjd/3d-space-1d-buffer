@@ -171,48 +171,48 @@ static bool calculate_quartet(
 		case AXIS_XPOSITIVE:
 			*quartet = (quartet_t){
 				.first = (coordinate_t){
-					.x = DIMENSION - 1 - section,
+					.x = section,
 					.y = layer,
-					.z = layer + offset
-				},
-				.second = (coordinate_t){
-					.x = DIMENSION - 1 - section,
-					.y = layer + offset,
-					.z = DIMENSION - 1 - layer
-				},
-				.third = (coordinate_t){
-					.x = DIMENSION - 1 - section,
-					.y = DIMENSION - 1 - layer,
 					.z = DIMENSION - 1 - layer - offset
 				},
-				.fourth = (coordinate_t){
-					.x = DIMENSION - 1 - section,
-					.y = DIMENSION - 1 - layer - offset,
+				.second = (coordinate_t){
+					.x = section,
+					.y = layer + offset,
 					.z = layer
+				},
+				.third = (coordinate_t){
+					.x = section,
+					.y = DIMENSION - 1 - layer,
+					.z = layer + offset
+				},
+				.fourth = (coordinate_t){
+					.x = section,
+					.y = DIMENSION - 1 - layer - offset,
+					.z = DIMENSION - 1 - layer
 				}
 			};
 			break;
 		case AXIS_XNEGATIVE:
 			*quartet = (quartet_t){
 				.first = (coordinate_t){
-					.x = section,
+					.x = DIMENSION - 1 - section,
 					.y = layer,
-					.z = DIMENSION - 1 - layer - offset
-				},
-				.second = (coordinate_t){
-					.x = section,
-					.y = layer + offset,
-					.z = layer
-				},
-				.third = (coordinate_t){
-					.x = section,
-					.y = DIMENSION - 1 - layer,
 					.z = layer + offset
 				},
-				.fourth = (coordinate_t){
-					.x = section,
-					.y = DIMENSION - 1 - layer - offset,
+				.second = (coordinate_t){
+					.x = DIMENSION - 1 - section,
+					.y = layer + offset,
 					.z = DIMENSION - 1 - layer
+				},
+				.third = (coordinate_t){
+					.x = DIMENSION - 1 - section,
+					.y = DIMENSION - 1 - layer,
+					.z = DIMENSION - 1 - layer - offset
+				},
+				.fourth = (coordinate_t){
+					.x = DIMENSION - 1 - section,
+					.y = DIMENSION - 1 - layer - offset,
+					.z = layer
 				}
 			};
 			break;
@@ -220,75 +220,51 @@ static bool calculate_quartet(
 			*quartet = (quartet_t){
 				.first = (coordinate_t){
 					.x = layer + offset,
-					.y = DIMENSION - 1 - section,
-					.z = layer
+					.y = section,
+					.z = DIMENSION - 1 - layer
 				},
 				.second = (coordinate_t){
 					.x = DIMENSION - 1 - layer,
-					.y = DIMENSION - 1 - section,
-					.z = layer + offset
+					.y = section,
+					.z = DIMENSION - 1 - layer - offset
 				},
 				.third = (coordinate_t){
 					.x = DIMENSION - 1 - layer - offset,
-					.y = DIMENSION - 1 - section,
-					.z = DIMENSION - 1 - layer
+					.y = section,
+					.z = layer
 				},
 				.fourth = (coordinate_t){
 					.x = layer,
-					.y = DIMENSION - 1 - section,
-					.z = DIMENSION - 1 - layer - offset
-				}
+					.y = section,
+					.z = layer + offset
+				},
 			};
 			break;
 		case AXIS_YNEGATIVE:
 			*quartet = (quartet_t){
 				.first = (coordinate_t){
 					.x = layer + offset,
-					.y = section,
-					.z = DIMENSION - 1 - layer
+					.y = DIMENSION - 1 - section,
+					.z = layer
 				},
 				.second = (coordinate_t){
 					.x = DIMENSION - 1 - layer,
-					.y = section,
-					.z = DIMENSION - 1 - layer - offset
+					.y = DIMENSION - 1 - section,
+					.z = layer + offset
 				},
 				.third = (coordinate_t){
 					.x = DIMENSION - 1 - layer - offset,
-					.y = section,
-					.z = layer
+					.y = DIMENSION - 1 - section,
+					.z = DIMENSION - 1 - layer
 				},
 				.fourth = (coordinate_t){
 					.x = layer,
-					.y = section,
-					.z = layer + offset
-				},
+					.y = DIMENSION - 1 - section,
+					.z = DIMENSION - 1 - layer - offset
+				}
 			};
 			break;
 		case AXIS_ZPOSITIVE:
-			*quartet = (quartet_t){
-				.first = (coordinate_t){
-					.x = DIMENSION - 1 - layer - offset,
-					.y = layer,
-					.z = DIMENSION - 1 - section
-				},
-				.second = (coordinate_t){
-					.x = layer,
-					.y = layer + offset,
-					.z = DIMENSION - 1 - section
-				},
-				.third = (coordinate_t){
-					.x = layer + offset,
-					.y = DIMENSION - 1 - layer,
-					.z = DIMENSION - 1 - section
-				},
-				.fourth = (coordinate_t){
-					.x = DIMENSION - 1 - layer,
-					.y = DIMENSION - 1 - layer - offset,
-					.z = DIMENSION - 1 - section
-				},
-			};
-			break;
-		case AXIS_ZNEGATIVE:
 			*quartet = (quartet_t){
 				.first = (coordinate_t){
 					.x = layer + offset,
@@ -310,7 +286,31 @@ static bool calculate_quartet(
 					.y = DIMENSION - 1 - layer - offset,
 					.z = section
 				}
-			};	
+			};
+			break;
+		case AXIS_ZNEGATIVE:
+			*quartet = (quartet_t){
+				.first = (coordinate_t){
+					.x = DIMENSION - 1 - layer - offset,
+					.y = layer,
+					.z = DIMENSION - 1 - section
+				},
+				.second = (coordinate_t){
+					.x = layer,
+					.y = layer + offset,
+					.z = DIMENSION - 1 - section
+				},
+				.third = (coordinate_t){
+					.x = layer + offset,
+					.y = DIMENSION - 1 - layer,
+					.z = DIMENSION - 1 - section
+				},
+				.fourth = (coordinate_t){
+					.x = DIMENSION - 1 - layer,
+					.y = DIMENSION - 1 - layer - offset,
+					.z = DIMENSION - 1 - section
+				},
+			};
 			break;
 		default:
 			return false;
