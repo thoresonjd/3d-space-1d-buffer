@@ -41,6 +41,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <termios.h>
+#include <unistd.h>
 
 static const uint8_t DIMENSION = 4;
 static const uint16_t SECTION_SIZE = DIMENSION * DIMENSION;
@@ -403,64 +405,134 @@ static bool rotate(tensor3_t tensor3[TENSOR3_SIZE], const axis_t axis) {
 	return true;
 }
 
+/**
+ * @brief Retrieve the current terminal settings.
+ * @return The parameters of the current terminal.
+ */
+static struct termios get_terminal() {
+	struct termios terminal;
+	tcgetattr(STDIN_FILENO, &terminal);
+	return terminal;
+}
+
+/**
+ * @brief Set the attributes of the current terminal.
+ * @param[in] The terminal parameters to set.
+ */
+static void set_terminal(const struct termios* terminal) {
+	tcsetattr(STDIN_FILENO, TCSANOW, terminal);
+	fflush(stdout);
+}
+
+/**
+ * @brief Enable noncanonical mode/disable canonical mode and disable the
+ *        echoing for the given terminal attributes.
+ * @param[in] The provided terminal settings to modify.
+ * @return A copy of the provided terminal settings in noncanonical mode.
+ */
+static struct termios terminal_noncanon(struct termios terminal) {
+	terminal.c_lflag &= ~(ICANON | ECHO);
+	return terminal;
+}
+
+/**
+ * @brief Process keyboard input.
+ * @param[in,out] tensor3 The third-order tensor to rotate.
+ * @param[in,out] section The section of the third-order tensor to render.
+ * @return true if the input was processed successfully, false otherwise.
+ */
+static bool process_input(
+	tensor3_t tensor3[TENSOR3_SIZE],
+	uint16_t* section
+) {
+	char c;
+	if (read(STDIN_FILENO, &c, 1) <= 0)
+		return false;
+	switch (c) {
+		case 'x':
+			// quit; currently, returning false will terminate the program
+			return false;
+		case 'w':
+			rotate(tensor3, AXIS_XNEGATIVE);
+			break;
+		case 's':
+			rotate(tensor3, AXIS_XPOSITIVE);
+			break;
+		case 'a':
+			rotate(tensor3, AXIS_YPOSITIVE);
+			break;
+		case 'd':
+			rotate(tensor3, AXIS_YNEGATIVE);
+			break;
+		case 'q':
+			rotate(tensor3, AXIS_ZNEGATIVE);
+			break;
+		case 'e':
+			rotate(tensor3, AXIS_ZPOSITIVE);
+			break;
+		case '\x1b': { // ANSI escape code
+			getchar(); // skip [
+			switch (getchar()) {
+				case 'A':
+					*section = (*section + 1) % DIMENSION;
+					break;
+				case 'B':
+					*section = *section ? *section - 1 : DIMENSION - 1;
+					break;
+			}
+			break;
+		}
+	}
+	return true;
+}
+
+/**
+ * @brief Clear the terminal.
+ */
+static void clear_screen() {
+	printf("\x1b[2J");
+}
+
+/**
+ * @brief Reset the cursor to the beginning of the terminal.
+ */
+static void reset_cursor() {
+	printf("\x1b[H");
+}
+
+/**
+ * @brief render the terminal
+ * @param[in] tensor3 The third-order tensor to render.
+ * @param[in] section Which secion of the third-order tensor to render.
+ */
+static void render_tensor3(tensor3_t tensor3[TENSOR3_SIZE], uint8_t section) {
+	coordinate_t coord = {0, 0, section};
+	for (
+		uint16_t i = coord_to_index(&coord);
+		i < (section + 1) * SECTION_SIZE && i < TENSOR3_SIZE;
+		i++
+	) {
+		putchar(tensor3[i]);
+		if (i % DIMENSION == DIMENSION - 1)
+			putchar('\n');
+	}
+}
+
 int main() {
 	tensor3_t tensor3[TENSOR3_SIZE];
+	uint16_t section = 0;
 	memset(tensor3, '.', TENSOR3_SIZE);
 	for (int i = 0; i < TENSOR3_SIZE; i++)
 		tensor3[i] = i + 'A';
-
-	printf("Coordinate to index:\n");
-	for (uint8_t z = 0; z < DIMENSION; z++) {
-		for (uint8_t y = 0; y < DIMENSION; y++) {
-			for (uint8_t x = 0; x < DIMENSION; x++) {
-				const coordinate_t coord = { x, y, z };
-				const uint32_t idx = coord_to_index(&coord);
-				printf("%d", idx);
-				if (idx < TENSOR3_SIZE - 1)
-					putchar(',');
-			}
-		}
-	}
-#if 0
-	printf("\n\nIndex to coordinate:\n");
-	for (uint32_t i = 0; i < TENSOR3_SIZE; i++) {
-		coordinate_t coord = { 0 };
-		if (index_to_coord(&coord, &i))
-			printf("%d,%d,%d\n", coord.x, coord.y, coord.z);
-	}
-#endif
-
-	printf("\nElements:\n");
-	for (uint8_t z = 0; z < DIMENSION; z++) {
-		for (uint8_t y = 0; y < DIMENSION; y++) {
-			for (uint8_t x = 0; x < DIMENSION; x++) {
-				const coordinate_t coord = { x, y, z };
-				const uint32_t idx = coord_to_index(&coord);
-				const char element = tensor3[idx];
-				putchar(element);
-			}
-			putchar('\n');
-		}
-		if (z < DIMENSION - 1)
-			printf("\n\n");
-	}
-	
-	printf(rotate(tensor3, AXIS_ZNEGATIVE) ? "SUCCESS\n" : "FAILURE\n");
-	
-	printf("\nElements:\n");
-	for (uint8_t z = 0; z < DIMENSION; z++) {
-		for (uint8_t y = 0; y < DIMENSION; y++) {
-			for (uint8_t x = 0; x < DIMENSION; x++) {
-				const coordinate_t coord = { x, y, z };
-				const uint32_t idx = coord_to_index(&coord);
-				const char element = tensor3[idx];
-				putchar(element);
-			}
-			putchar('\n');
-		}
-		if (z < DIMENSION - 1)
-			printf("\n\n");
-	}
-	
+	struct termios orig_terminal = get_terminal();
+	struct termios new_terminal = terminal_noncanon(orig_terminal);
+	set_terminal(&new_terminal);
+	clear_screen();
+	do {
+		reset_cursor();
+		render_tensor3(tensor3, section);
+	} while (process_input(tensor3, &section));
+	set_terminal(&orig_terminal);
+	return 0;
 }
 
