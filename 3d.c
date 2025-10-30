@@ -40,18 +40,31 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <termios.h>
 #include <unistd.h>
 
-static const uint8_t DIMENSION = 4;
-static const uint16_t SECTION_SIZE = DIMENSION * DIMENSION;
-static const uint32_t TENSOR3_SIZE = SECTION_SIZE * DIMENSION;
+/**
+ * @brief The program's minimum allowed dimension for a third-order tensor.
+ */
+const uint8_t TENSOR3_DIM_MIN = 3;
+
+/**
+ * @brief The program's maximum allowed dimension for a third-order tensor.
+ */
+const uint8_t TENSOR3_DIM_MAX = 50;
 
 /**
  * @brief A third-order tensor represented by a one-dimensional buffer.
  */
-typedef uint8_t tensor3_t;
+typedef struct {
+	uint8_t* buffer;
+	uint8_t dimension;
+	uint8_t section;
+	uint16_t section_size;
+	uint32_t size;
+} tensor3_t;
 
 /**
  * @brief A coordinate representing an element within a third-order tensor.
@@ -111,305 +124,10 @@ typedef enum {
 } axis_t;
 
 /**
- * @brief Calculate the index of a third-order tensor given a coordinate.
- * @param[in] coordinate_t A coordinate structure to convert to an index.
- * @return The calculated index.
- *
- * Formula: index = x + (y * width) + (z * width * height)
- */
-static uint32_t coord_to_index(const coordinate_t* const coord) {
-	return coord->x + (coord->y * DIMENSION) + (coord->z * SECTION_SIZE);
-}
-
-/**
- * @brief Convert an index to a corresponding coordinate.
- * @param[out] coord The coordinate to calculate.
- * @param[in] idx The index to convert into a coordinate.
- * @return true if the conversion was successful, false otherwise
- *
- * Every time the index increases by one width, the x value resets.
- * x = index % width
- *
- * When the index increases by one width, the height increases by one. Once the
- * index increases by width times height, the y value resets.
- * y = (index / width) % height
- *
- * As the index increases by width times height, the z value increases by one.
- * z = index / (width * height)
- */
-[[maybe_unused]] static bool index_to_coord(
-	coordinate_t* const coord,
-	const uint32_t* const idx
-) {
-	if (*idx >= TENSOR3_SIZE)
-		return false;
-	coord->x = *idx % DIMENSION;
-	coord->y = (*idx / DIMENSION) % DIMENSION;
-	coord->z = *idx / SECTION_SIZE;
-	return true;
-}
-
-/**
- * @brief Calculate a quartet of coordinates to rotate in a third-order tensor.
- * @param[out] quartet The quartet of coordinates under calculation.
- * @param[in] section The section of the tensor.
- * @param[in] layer The layer within the section.
- * @param[in] offset The offset within the layer.
- * @param[in] axis The axis to rotate about.
- * @return true if the calculation was successful, false otherwise
- */
-static bool calculate_quartet(
-	quartet_t* const quartet,
-	const uint8_t section,
-	const uint8_t layer,
-	const uint8_t offset,
-	const axis_t axis
-) {
-	if (section >= DIMENSION
-		|| layer >= SECTION_SIZE / 2
-		|| offset >= DIMENSION - 1 - 2 * layer)
-		return false;
-	switch (axis) {
-		case AXIS_XPOSITIVE:
-			*quartet = (quartet_t){
-				.first = (coordinate_t){
-					.x = section,
-					.y = layer,
-					.z = DIMENSION - 1 - layer - offset
-				},
-				.second = (coordinate_t){
-					.x = section,
-					.y = layer + offset,
-					.z = layer
-				},
-				.third = (coordinate_t){
-					.x = section,
-					.y = DIMENSION - 1 - layer,
-					.z = layer + offset
-				},
-				.fourth = (coordinate_t){
-					.x = section,
-					.y = DIMENSION - 1 - layer - offset,
-					.z = DIMENSION - 1 - layer
-				}
-			};
-			break;
-		case AXIS_XNEGATIVE:
-			*quartet = (quartet_t){
-				.first = (coordinate_t){
-					.x = DIMENSION - 1 - section,
-					.y = layer,
-					.z = layer + offset
-				},
-				.second = (coordinate_t){
-					.x = DIMENSION - 1 - section,
-					.y = layer + offset,
-					.z = DIMENSION - 1 - layer
-				},
-				.third = (coordinate_t){
-					.x = DIMENSION - 1 - section,
-					.y = DIMENSION - 1 - layer,
-					.z = DIMENSION - 1 - layer - offset
-				},
-				.fourth = (coordinate_t){
-					.x = DIMENSION - 1 - section,
-					.y = DIMENSION - 1 - layer - offset,
-					.z = layer
-				}
-			};
-			break;
-		case AXIS_YPOSITIVE:
-			*quartet = (quartet_t){
-				.first = (coordinate_t){
-					.x = layer + offset,
-					.y = section,
-					.z = DIMENSION - 1 - layer
-				},
-				.second = (coordinate_t){
-					.x = DIMENSION - 1 - layer,
-					.y = section,
-					.z = DIMENSION - 1 - layer - offset
-				},
-				.third = (coordinate_t){
-					.x = DIMENSION - 1 - layer - offset,
-					.y = section,
-					.z = layer
-				},
-				.fourth = (coordinate_t){
-					.x = layer,
-					.y = section,
-					.z = layer + offset
-				},
-			};
-			break;
-		case AXIS_YNEGATIVE:
-			*quartet = (quartet_t){
-				.first = (coordinate_t){
-					.x = layer + offset,
-					.y = DIMENSION - 1 - section,
-					.z = layer
-				},
-				.second = (coordinate_t){
-					.x = DIMENSION - 1 - layer,
-					.y = DIMENSION - 1 - section,
-					.z = layer + offset
-				},
-				.third = (coordinate_t){
-					.x = DIMENSION - 1 - layer - offset,
-					.y = DIMENSION - 1 - section,
-					.z = DIMENSION - 1 - layer
-				},
-				.fourth = (coordinate_t){
-					.x = layer,
-					.y = DIMENSION - 1 - section,
-					.z = DIMENSION - 1 - layer - offset
-				}
-			};
-			break;
-		case AXIS_ZPOSITIVE:
-			*quartet = (quartet_t){
-				.first = (coordinate_t){
-					.x = layer + offset,
-					.y = layer,
-					.z = section
-				},
-				.second = (coordinate_t){
-					.x = DIMENSION - 1 - layer,
-					.y = layer + offset,
-					.z = section
-				},
-				.third = (coordinate_t){
-					.x = DIMENSION - 1 - layer - offset,
-					.y = DIMENSION - 1 - layer,
-					.z = section
-				},
-				.fourth = (coordinate_t){
-					.x = layer,
-					.y = DIMENSION - 1 - layer - offset,
-					.z = section
-				}
-			};
-			break;
-		case AXIS_ZNEGATIVE:
-			*quartet = (quartet_t){
-				.first = (coordinate_t){
-					.x = DIMENSION - 1 - layer - offset,
-					.y = layer,
-					.z = DIMENSION - 1 - section
-				},
-				.second = (coordinate_t){
-					.x = layer,
-					.y = layer + offset,
-					.z = DIMENSION - 1 - section
-				},
-				.third = (coordinate_t){
-					.x = layer + offset,
-					.y = DIMENSION - 1 - layer,
-					.z = DIMENSION - 1 - section
-				},
-				.fourth = (coordinate_t){
-					.x = DIMENSION - 1 - layer,
-					.y = DIMENSION - 1 - layer - offset,
-					.z = DIMENSION - 1 - section
-				},
-			};
-			break;
-		default:
-			return false;
-	}
-	return true;
-}
-
-/**
- * @brief Rotate a quartet of coordinates in a layer of a third-order tensor.
- * @param[in,out] buffer The third-order tensor being rotated.
- * @param[in] section The section being rotated.
- * @param[in] layer The layer being rotated.
- * @param[in] offset The offset within the layer used to calculate the quartet.
- * @param[in] axis The axis to rotate about.
- * @return true if the rotation was successful, false otherwise
- */
-static bool rotate_quartet(
-	tensor3_t tensor3[TENSOR3_SIZE],
-	const uint8_t section,
-	const uint8_t layer,
-	const uint8_t offset,
-	const axis_t axis
-) {
-	quartet_t quartet = { 0 };
-	if (!calculate_quartet(&quartet, section, layer, offset, axis))
-		return false;
-	uint32_t first_idx = coord_to_index(&quartet.first);
-	uint32_t second_idx = coord_to_index(&quartet.second);
-	uint32_t third_idx = coord_to_index(&quartet.third);
-	uint32_t fourth_idx = coord_to_index(&quartet.fourth);
-	char first = tensor3[first_idx];	
-	char second = tensor3[second_idx];	
-	char third = tensor3[third_idx];	
-	char fourth = tensor3[fourth_idx];	
-	tensor3[first_idx] = fourth; 
-	tensor3[second_idx] = first;
-	tensor3[third_idx] = second;
-	tensor3[fourth_idx] = third;
-	return true;
-}
-
-/**
- * @brief Rotate a layer of a cross section of a third-order tensor 90 degrees.
- * @param[in,out] buffer The third-order tensor being rotated.
- * @param[in] section The section being rotated.
- * @param[in] layer The layer to rotate.
- * @param[in] axis The axis to rotate about.
- * @return true if the rotation was successful, false otherwise
- */
-static bool rotate_layer(
-	tensor3_t tensor3[TENSOR3_SIZE],
-	const uint8_t section,
-	const uint8_t layer,
-	const axis_t axis
-) {
-	for (uint8_t offset = 0; offset < DIMENSION - 1 - 2 * layer; offset++)
-		if (!rotate_quartet(tensor3, section, layer, offset, axis))
-			return false;
-	return true;
-}
-
-/**
- * @brief Rotates a cross section of a third-order tensor 90 degrees.
- * @param[in,out] buffer The third-order tensor being rotated.
- * @param[in] section The section to rotate.
- * @param[in] axis The axis to rotate about.
- * @return true if the rotation was successful, false otherwise
- */
-static bool rotate_section(
-	tensor3_t tensor3[TENSOR3_SIZE],
-	const uint8_t section,
-	const axis_t axis
-) {
-	for (uint8_t layer = 0; layer < SECTION_SIZE / 2; layer++)
-		if (!rotate_layer(tensor3, section, layer, axis))
-			return false;
-	return true;
-}
-
-/**
- * @brief Rotates a third-order tensor 90 degrees.
- * @param[in,out] buffer The third-order tensor to rotate.
- * @param[in] axis The axis to rotate about.
- * @return true if the rotation was successful, false otherwise
- */
-static bool rotate(tensor3_t tensor3[TENSOR3_SIZE], const axis_t axis) {
-	for (uint8_t section = 0; section < DIMENSION; section++) 
-		if (!rotate_section(tensor3, section, axis))
-			return false;
-	return true;
-}
-
-/**
  * @brief Retrieve the current terminal settings.
  * @return The parameters of the current terminal.
  */
-static struct termios get_terminal() {
+static struct termios terminal_get() {
 	struct termios terminal;
 	tcgetattr(STDIN_FILENO, &terminal);
 	return terminal;
@@ -419,7 +137,7 @@ static struct termios get_terminal() {
  * @brief Set the attributes of the current terminal.
  * @param[in] The terminal parameters to set.
  */
-static void set_terminal(const struct termios* terminal) {
+static void terminal_set(const struct termios* terminal) {
 	tcsetattr(STDIN_FILENO, TCSANOW, terminal);
 	fflush(stdout);
 }
@@ -435,16 +153,376 @@ static struct termios terminal_noncanon(struct termios terminal) {
 	return terminal;
 }
 
+static struct termios terminal_init() {
+	struct termios orig_terminal = terminal_get();
+	struct termios new_terminal = terminal_noncanon(orig_terminal);
+	terminal_set(&new_terminal);
+	return orig_terminal;
+}
+
+/**
+ * @brief Clear the terminal and reset the cursor.
+ */
+static void terminal_clear() {
+	printf("\x1b[2J\x1b[H");
+}
+
+/**
+ * @brief Parse an unsigned 8-bit integer from a string.
+ * @param[in] arg The string to parse for a uint8 value.
+ * @param[out] value The parsed uint8 value.
+ * @return true if a uint8 value was parsed successfully, false otherwise
+ */
+static bool uint8_parse(const char* const arg, uint8_t* const value) {
+	if (!arg || !value)
+		return false;
+	int64_t temp_value;
+	if (!sscanf(arg, "%ld", &temp_value))
+		return false;
+	if (temp_value < 0 || temp_value > UINT8_MAX)
+		return false;
+	*value = (uint8_t)temp_value;
+	return true;
+}
+
+/**
+ * @brief Initialize a third-order tensor from string arguments.
+ * @param[in] argc The number of arguments.
+ * @param[in] argv An array of arguments.
+ * @param[out] tensor3 The third-order tensor to initialize.
+ * @return true if the third-order tensor was initialized, false otherwise
+ */
+static bool tensor3_init_from_args(
+	const int* const argc,
+	char** const argv,
+	tensor3_t* const tensor3
+) {
+	if (*argc != 2)
+		return false;
+	if (!uint8_parse(argv[1], &tensor3->dimension))
+		return false;
+	if (tensor3->dimension < TENSOR3_DIM_MIN || tensor3->dimension > TENSOR3_DIM_MAX)
+		return false;
+	tensor3->section = 0;
+	tensor3->section_size = tensor3->dimension * tensor3->dimension;
+	tensor3->size = tensor3->section_size * tensor3->dimension;
+	tensor3->buffer = (uint8_t*)malloc(tensor3->size);
+	if (!tensor3->buffer)
+		return false;
+	for (int i = 0; i < tensor3->size; i++)
+		tensor3->buffer[i] = (i / tensor3->section_size) % ('Z' - 'A') + 'A';
+	return true;
+}
+
+/**
+ * @brief Calculate the index of a third-order tensor given a coordinate.
+ * @param[in] coordinate_t A coordinate structure to convert to an index.
+ * @return The calculated index.
+ *
+ * Formula: index = x + (y * width) + (z * width * height)
+ */
+static uint32_t tensor3_coord_to_index(
+	const coordinate_t* const coord,
+	const tensor3_t* const tensor3
+) {
+	return coord->x + (coord->y * tensor3->dimension) + (coord->z * tensor3->section_size);
+}
+
+/**
+ * @brief Convert an index to a corresponding coordinate.
+ * @param[out] coord The coordinate to calculate.
+ * @param[in] idx The index to convert into a coordinate.
+ * @param[in] tensor3 The third-order tensor to calculate the coordinate for.
+ * @return true if the conversion was successful, false otherwise
+ *
+ * Every time the index increases by one width, the x value resets.
+ * x = index % width
+ *
+ * When the index increases by one width, the height increases by one. Once the
+ * index increases by width times height, the y value resets.
+ * y = (index / width) % height
+ *
+ * As the index increases by width times height, the z value increases by one.
+ * z = index / (width * height)
+ */
+[[maybe_unused]] static bool tensor3_index_to_coord(
+	coordinate_t* const coord,
+	const uint32_t* const idx,
+	const tensor3_t* const tensor3
+) {
+	if (*idx >= tensor3->size)
+		return false;
+	coord->x = *idx % tensor3->dimension;
+	coord->y = (*idx / tensor3->dimension) % tensor3->dimension;
+	coord->z = *idx / tensor3->section_size;
+	return true;
+}
+
+/**
+ * @brief Calculate a quartet of coordinates to rotate in a third-order tensor.
+ * @param[out] quartet The quartet of coordinates under calculation.
+ * @param[in] tensor3 The third-order tensor to calculate the quartet of.
+ * @param[in] section The section of the tensor to calculate the quartet for.
+ * @param[in] layer The layer within the section.
+ * @param[in] offset The offset within the layer.
+ * @param[in] axis The axis to rotate about.
+ * @return true if the calculation was successful, false otherwise
+ */
+static bool tensor3_calculate_quartet(
+	tensor3_t* const tensor3,
+	quartet_t* const quartet,
+	const uint8_t* const section,
+	const uint8_t* const layer,
+	const uint8_t* const offset,
+	const axis_t* const axis
+) {
+	if (*section >= tensor3->dimension
+		|| *layer >= tensor3->section_size / 2
+		|| *offset >= tensor3->dimension - 1 - 2 * *layer)
+		return false;
+	switch (*axis) {
+		case AXIS_XPOSITIVE:
+			*quartet = (quartet_t){
+				.first = (coordinate_t){
+					.x = *section,
+					.y = *layer,
+					.z = tensor3->dimension - 1 - *layer - *offset
+				},
+				.second = (coordinate_t){
+					.x = *section,
+					.y = *layer + *offset,
+					.z = *layer
+				},
+				.third = (coordinate_t){
+					.x = *section,
+					.y = tensor3->dimension - 1 - *layer,
+					.z = *layer + *offset
+				},
+				.fourth = (coordinate_t){
+					.x = *section,
+					.y = tensor3->dimension - 1 - *layer - *offset,
+					.z = tensor3->dimension - 1 - *layer
+				}
+			};
+			break;
+		case AXIS_XNEGATIVE:
+			*quartet = (quartet_t){
+				.first = (coordinate_t){
+					.x = tensor3->dimension - 1 - *section,
+					.y = *layer,
+					.z = *layer + *offset
+				},
+				.second = (coordinate_t){
+					.x = tensor3->dimension - 1 - *section,
+					.y = *layer + *offset,
+					.z = tensor3->dimension - 1 - *layer
+				},
+				.third = (coordinate_t){
+					.x = tensor3->dimension - 1 - *section,
+					.y = tensor3->dimension - 1 - *layer,
+					.z = tensor3->dimension - 1 - *layer - *offset
+				},
+				.fourth = (coordinate_t){
+					.x = tensor3->dimension - 1 - *section,
+					.y = tensor3->dimension - 1 - *layer - *offset,
+					.z = *layer
+				}
+			};
+			break;
+		case AXIS_YPOSITIVE:
+			*quartet = (quartet_t){
+				.first = (coordinate_t){
+					.x = *layer + *offset,
+					.y = *section,
+					.z = tensor3->dimension - 1 - *layer
+				},
+				.second = (coordinate_t){
+					.x = tensor3->dimension - 1 - *layer,
+					.y = *section,
+					.z = tensor3->dimension - 1 - *layer - *offset
+				},
+				.third = (coordinate_t){
+					.x = tensor3->dimension - 1 - *layer - *offset,
+					.y = *section,
+					.z = *layer
+				},
+				.fourth = (coordinate_t){
+					.x = *layer,
+					.y = *section,
+					.z = *layer + *offset
+				},
+			};
+			break;
+		case AXIS_YNEGATIVE:
+			*quartet = (quartet_t){
+				.first = (coordinate_t){
+					.x = *layer + *offset,
+					.y = tensor3->dimension - 1 - *section,
+					.z = *layer
+				},
+				.second = (coordinate_t){
+					.x = tensor3->dimension - 1 - *layer,
+					.y = tensor3->dimension - 1 - *section,
+					.z = *layer + *offset
+				},
+				.third = (coordinate_t){
+					.x = tensor3->dimension - 1 - *layer - *offset,
+					.y = tensor3->dimension - 1 - *section,
+					.z = tensor3->dimension - 1 - *layer
+				},
+				.fourth = (coordinate_t){
+					.x = *layer,
+					.y = tensor3->dimension - 1 - *section,
+					.z = tensor3->dimension - 1 - *layer - *offset
+				}
+			};
+			break;
+		case AXIS_ZPOSITIVE:
+			*quartet = (quartet_t){
+				.first = (coordinate_t){
+					.x = *layer + *offset,
+					.y = *layer,
+					.z = *section
+				},
+				.second = (coordinate_t){
+					.x = tensor3->dimension - 1 - *layer,
+					.y = *layer + *offset,
+					.z = *section
+				},
+				.third = (coordinate_t){
+					.x = tensor3->dimension - 1 - *layer - *offset,
+					.y = tensor3->dimension - 1 - *layer,
+					.z = *section
+				},
+				.fourth = (coordinate_t){
+					.x = *layer,
+					.y = tensor3->dimension - 1 - *layer - *offset,
+					.z = *section
+				}
+			};
+			break;
+		case AXIS_ZNEGATIVE:
+			*quartet = (quartet_t){
+				.first = (coordinate_t){
+					.x = tensor3->dimension - 1 - *layer - *offset,
+					.y = *layer,
+					.z = tensor3->dimension - 1 - *section
+				},
+				.second = (coordinate_t){
+					.x = *layer,
+					.y = *layer + *offset,
+					.z = tensor3->dimension - 1 - *section
+				},
+				.third = (coordinate_t){
+					.x = *layer + *offset,
+					.y = tensor3->dimension - 1 - *layer,
+					.z = tensor3->dimension - 1 - *section
+				},
+				.fourth = (coordinate_t){
+					.x = tensor3->dimension - 1 - *layer,
+					.y = tensor3->dimension - 1 - *layer - *offset,
+					.z = tensor3->dimension - 1 - *section
+				},
+			};
+			break;
+		default:
+			return false;
+	}
+	return true;
+}
+
+/**
+ * @brief Rotate a quartet of coordinates in a layer of a third-order tensor.
+ * @param[in,out] tensor3 The third-order tensor being rotated.
+ * @param[in] section The section being rotated.
+ * @param[in] layer The layer being rotated.
+ * @param[in] offset The offset within the layer used to calculate the quartet.
+ * @param[in] axis The axis to rotate about.
+ * @return true if the rotation was successful, false otherwise
+ */
+static bool tensor3_rotate_quartet(
+	tensor3_t* const tensor3,
+	const uint8_t* const section,
+	const uint8_t* const layer,
+	const uint8_t* const offset,
+	const axis_t* const axis
+) {
+	quartet_t quartet = { 0 };
+	if (!tensor3_calculate_quartet(tensor3, &quartet, section, layer, offset, axis))
+		return false;
+	uint32_t first_idx = tensor3_coord_to_index(&quartet.first, tensor3);
+	uint32_t second_idx = tensor3_coord_to_index(&quartet.second, tensor3);
+	uint32_t third_idx = tensor3_coord_to_index(&quartet.third, tensor3);
+	uint32_t fourth_idx = tensor3_coord_to_index(&quartet.fourth, tensor3);
+	char first = tensor3->buffer[first_idx];
+	char second = tensor3->buffer[second_idx];
+	char third = tensor3->buffer[third_idx];
+	char fourth = tensor3->buffer[fourth_idx];
+	tensor3->buffer[first_idx] = fourth;
+	tensor3->buffer[second_idx] = first;
+	tensor3->buffer[third_idx] = second;
+	tensor3->buffer[fourth_idx] = third;
+	return true;
+}
+
+/**
+ * @brief Rotate a layer of a cross section of a third-order tensor 90 degrees.
+ * @param[in,out] tensor3 The third-order tensor being rotated.
+ * @param[in] section The section being rotated.
+ * @param[in] layer The layer to rotate.
+ * @param[in] axis The axis to rotate about.
+ * @return true if the rotation was successful, false otherwise
+ */
+static bool tensor3_rotate_layer(
+	tensor3_t* const tensor3,
+	const uint8_t* const section,
+	const uint8_t* const layer,
+	const axis_t* const axis
+) {
+	const uint8_t offset_end = tensor3->dimension - 1 - 2 * *layer;
+	for (uint8_t offset = 0; offset < offset_end; offset++)
+		if (!tensor3_rotate_quartet(tensor3, section, layer, &offset, axis))
+			return false;
+	return true;
+}
+
+/**
+ * @brief Rotates a cross section of a third-order tensor 90 degrees.
+ * @param[in,out] tensor3 The third-order tensor being rotated.
+ * @param[in] section The section to rotate.
+ * @param[in] axis The axis to rotate about.
+ * @return true if the rotation was successful, false otherwise
+ */
+static bool tensor3_rotate_section(
+	tensor3_t* const tensor3,
+	const uint8_t* const section,
+	const axis_t* const axis
+) {
+	for (uint8_t layer = 0; layer < tensor3->dimension / 2; layer++)
+		if (!tensor3_rotate_layer(tensor3, section, &layer, axis))
+			return false;
+	return true;
+}
+
+/**
+ * @brief Rotates a third-order tensor 90 degrees.
+ * @param[in,out] tensor3 The third-order tensor to rotate.
+ * @param[in] axis The axis to rotate about.
+ * @return true if the rotation was successful, false otherwise
+ */
+static bool tensor3_rotate(tensor3_t* const tensor3, const axis_t axis) {
+	for (uint8_t section = 0; section < tensor3->dimension; section++) 
+		if (!tensor3_rotate_section(tensor3, &section, &axis))
+			return false;
+	return true;
+}
+
 /**
  * @brief Process keyboard input.
  * @param[in,out] tensor3 The third-order tensor to rotate.
- * @param[in,out] section The section of the third-order tensor to render.
  * @return true if the input was processed successfully, false otherwise.
  */
-static bool process_input(
-	tensor3_t tensor3[TENSOR3_SIZE],
-	uint16_t* section
-) {
+static bool tensor3_process_input(tensor3_t* const tensor3) {
 	char c;
 	if (read(STDIN_FILENO, &c, 1) <= 0)
 		return false;
@@ -453,33 +531,31 @@ static bool process_input(
 			// quit; currently, returning false will terminate the program
 			return false;
 		case 'w':
-			rotate(tensor3, AXIS_XNEGATIVE);
+			tensor3_rotate(tensor3, AXIS_XNEGATIVE);
 			break;
 		case 's':
-			rotate(tensor3, AXIS_XPOSITIVE);
+			tensor3_rotate(tensor3, AXIS_XPOSITIVE);
 			break;
 		case 'a':
-			rotate(tensor3, AXIS_YPOSITIVE);
+			tensor3_rotate(tensor3, AXIS_YPOSITIVE);
 			break;
 		case 'd':
-			rotate(tensor3, AXIS_YNEGATIVE);
+			tensor3_rotate(tensor3, AXIS_YNEGATIVE);
 			break;
 		case 'q':
-			rotate(tensor3, AXIS_ZNEGATIVE);
+			tensor3_rotate(tensor3, AXIS_ZNEGATIVE);
 			break;
 		case 'e':
-			rotate(tensor3, AXIS_ZPOSITIVE);
+			tensor3_rotate(tensor3, AXIS_ZPOSITIVE);
 			break;
+		// UP and DOWN arrow keys are used to move sections
 		case '\x1b': { // ANSI escape code
 			getchar(); // skip [
-			switch (getchar()) {
-				case 'A':
-					*section = (*section + 1) % DIMENSION;
-					break;
-				case 'B':
-					*section = *section ? *section - 1 : DIMENSION - 1;
-					break;
-			}
+			char value = getchar();
+			if (value == 'A' && tensor3->section < tensor3->dimension - 1)
+				tensor3->section++;
+			else if (value == 'B' && tensor3->section > 0)
+				tensor3->section--;
 			break;
 		}
 	}
@@ -487,52 +563,30 @@ static bool process_input(
 }
 
 /**
- * @brief Clear the terminal.
- */
-static void clear_screen() {
-	printf("\x1b[2J");
-}
-
-/**
- * @brief Reset the cursor to the beginning of the terminal.
- */
-static void reset_cursor() {
-	printf("\x1b[H");
-}
-
-/**
- * @brief render the terminal
+ * @brief Print (a section of) the third-order tensor to the terminal.
  * @param[in] tensor3 The third-order tensor to render.
- * @param[in] section Which secion of the third-order tensor to render.
  */
-static void render_tensor3(tensor3_t tensor3[TENSOR3_SIZE], uint8_t section) {
-	coordinate_t coord = {0, 0, section};
-	for (
-		uint16_t i = coord_to_index(&coord);
-		i < (section + 1) * SECTION_SIZE && i < TENSOR3_SIZE;
-		i++
-	) {
-		putchar(tensor3[i]);
-		if (i % DIMENSION == DIMENSION - 1)
+static void tensor3_render(const tensor3_t* const tensor3) {
+	const coordinate_t coord = {0, 0, tensor3->section};
+	const uint16_t index_start = tensor3_coord_to_index(&coord, tensor3);
+	const uint16_t index_end = (tensor3->section + 1) * tensor3->section_size;
+	for (uint16_t i = index_start; i < index_end && i < tensor3->size; i++) {
+		putchar(tensor3->buffer[i]);
+		if (i % tensor3->dimension == tensor3->dimension - 1)
 			putchar('\n');
 	}
 }
 
-int main() {
-	tensor3_t tensor3[TENSOR3_SIZE];
-	uint16_t section = 0;
-	memset(tensor3, '.', TENSOR3_SIZE);
-	for (int i = 0; i < TENSOR3_SIZE; i++)
-		tensor3[i] = i + 'A';
-	struct termios orig_terminal = get_terminal();
-	struct termios new_terminal = terminal_noncanon(orig_terminal);
-	set_terminal(&new_terminal);
-	clear_screen();
+int main(int argc, char** argv) {
+	tensor3_t tensor3;
+	if (!tensor3_init_from_args(&argc, argv, &tensor3))
+		return 1;
+	struct termios orig_terminal = terminal_init();
 	do {
-		reset_cursor();
-		render_tensor3(tensor3, section);
-	} while (process_input(tensor3, &section));
-	set_terminal(&orig_terminal);
+		terminal_clear();
+		tensor3_render(&tensor3);
+	} while (tensor3_process_input(&tensor3));
+	terminal_set(&orig_terminal);
 	return 0;
 }
 
