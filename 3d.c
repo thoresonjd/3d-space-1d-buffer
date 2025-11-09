@@ -135,7 +135,7 @@ static struct termios terminal_get() {
 
 /**
  * @brief Set the attributes of the current terminal.
- * @param[in] The terminal parameters to set.
+ * @param[in] terminal The terminal parameters to set.
  */
 static void terminal_set(const struct termios* terminal) {
 	tcsetattr(STDIN_FILENO, TCSANOW, terminal);
@@ -145,7 +145,7 @@ static void terminal_set(const struct termios* terminal) {
 /**
  * @brief Enable noncanonical mode/disable canonical mode and disable the
  *        echoing for the given terminal attributes.
- * @param[in] The provided terminal settings to modify.
+ * @param[in] terminal The provided terminal settings to modify.
  * @return A copy of the provided terminal settings in noncanonical mode.
  */
 static struct termios terminal_noncanon(struct termios terminal) {
@@ -153,6 +153,10 @@ static struct termios terminal_noncanon(struct termios terminal) {
 	return terminal;
 }
 
+/**
+ * @brief Initialize the terminal configuration.
+ * @return The attributes of the terminal prior to initialization
+ */
 static struct termios terminal_init() {
 	struct termios orig_terminal = terminal_get();
 	struct termios new_terminal = terminal_noncanon(orig_terminal);
@@ -216,7 +220,8 @@ static bool tensor3_init_from_args(
 
 /**
  * @brief Calculate the index of a third-order tensor given a coordinate.
- * @param[in] coordinate_t A coordinate structure to convert to an index.
+ * @param[in] coord A coordinate structure to convert to an index.
+ * @param[in] tensor3 The third-order tensor to calculate the index for.
  * @return The calculated index.
  *
  * Formula: index = x + (y * width) + (z * width * height)
@@ -487,7 +492,7 @@ static bool tensor3_rotate_layer(
 }
 
 /**
- * @brief Rotates a cross section of a third-order tensor 90 degrees.
+ * @brief Rotate a cross section of a third-order tensor 90 degrees.
  * @param[in,out] tensor3 The third-order tensor being rotated.
  * @param[in] section The section to rotate.
  * @param[in] axis The axis to rotate about.
@@ -505,7 +510,7 @@ static bool tensor3_rotate_section(
 }
 
 /**
- * @brief Rotates a third-order tensor 90 degrees.
+ * @brief Rotate a third-order tensor 90 degrees.
  * @param[in,out] tensor3 The third-order tensor to rotate.
  * @param[in] axis The axis to rotate about.
  * @return true if the rotation was successful, false otherwise
